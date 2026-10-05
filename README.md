@@ -1,5 +1,7 @@
 # Kesra Agency System
 
+🔗 **Live System Preview:** [https://agency-management-system-alpha.vercel.app/](https://agency-management-system-alpha.vercel.app/)
+
 The **Kesra Agency System** is a comprehensive, internal **Agency Management System (ERP/CRM)** designed specifically to streamline the daily operations of a marketing or creative agency. It centralizes everything from client management and project execution to team capacity planning and performance reporting.
 
 ## Key Modules & Features
