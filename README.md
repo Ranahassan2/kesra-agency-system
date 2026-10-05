@@ -1,20 +1,33 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Kesra Agency System
 
-# Run and deploy your AI Studio app
+The **Kesra Agency System** is a comprehensive, internal **Agency Management System (ERP/CRM)** designed specifically to streamline the daily operations of a marketing or creative agency. It centralizes everything from client management and project execution to team capacity planning and performance reporting.
 
-This contains everything you need to run your app locally.
+## Key Modules & Features
 
-View your app in AI Studio: https://ai.studio/apps/fc232ad9-1072-43e6-8a63-ad95cd19cab4
+### 1. Dashboard & Analytics
+A central hub that provides a high-level overview of agency performance, active projects, and key metrics.
 
-## Run Locally
+### 2. Employee Work & Tasks
+- **My Work:** A personalized view for each employee to track their own assigned tasks, priorities, and deadlines.
+- **Task Management:** A robust system (utilizing Kanban boards and lists) to assign, track, and update tasks across different departments.
 
-**Prerequisites:**  Node.js
+### 3. Client & Project Management
+- **Onboarding:** A streamlined process for welcoming and setting up new clients into the system.
+- **Service Briefs & Templates:** Tools to create, manage, and store detailed project requirements (briefs) to ensure the team understands the client's goals.
 
+### 4. Resource & Team Management
+- **Capacity Planning:** Allows management to see workload distribution, ensuring no team member is overwhelmed and resources are allocated efficiently.
+- **Employees Directory:** Manages HR aspects, employee roles, and access permissions.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+### 5. Operations & Execution
+- **Daily Operations:** A module for tracking day-to-day activities, logging work hours, or managing routine agency processes.
+- **Campaigns:** Dedicated tools to plan, track, and execute specific marketing campaigns for clients.
+
+### 6. Reporting & AI Integration
+- **Reports:** Generates detailed performance reports that can be exported (via built-in PDF and Excel tools) for clients or internal review.
+- **AI Capabilities:** Integrated with Google Gemini AI to assist with generating insights, writing content, or analyzing data automatically.
+
+## Technology Stack
+- **Frontend:** Built with React.js, TypeScript, and Tailwind CSS for a fast, modern, and responsive user interface.
+- **Backend & Database:** Powered by Supabase (PostgreSQL, Authentication, and Realtime Database).
+- **AI Integration:** Google Gemini API for smart automation.
