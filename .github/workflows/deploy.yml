@@ -1,0 +1,49 @@
+name: Deploy to Hostinger
+
+# Builds the app and syncs dist/ to Hostinger over FTP whenever a push/merge lands on main.
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    name: Build and deploy via FTP
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build project
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_ENABLE_EMPLOYEE_IMPERSONATION: ${{ secrets.VITE_ENABLE_EMPLOYEE_IMPERSONATION }}
+
+      # Diffs against the sync-state file it maintains on the server, so each run only uploads
+      # changed files and removes files that no longer exist in dist/ — not a plain additive
+      # upload. server-dir is "./": the current FTP account (u934284991.kmsdeploy) is rooted
+      # directly at the subdomain's own document root,
+      # /home/u934284991/domains/kesraa.com/public_html/kms — so no subpath is needed at all.
+      # The previous FTP account was rooted elsewhere (one level up, at the shared public_html/),
+      # which is why server-dir was "public_html/" at that time; kept as-is here, "public_html/"
+      # would have created a stray nested public_html/public_html/ folder the site never serves.
+      # If the FTP account is ever swapped again, re-check what it's rooted at before assuming
+      # either value still applies.
+      - name: Deploy to Hostinger via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./dist/
+          server-dir: ./

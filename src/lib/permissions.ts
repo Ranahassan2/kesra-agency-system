@@ -1,0 +1,231 @@
+import { BriefRecord, ClientRecord, ServiceType, UserRecord, UserRole } from '../types/database';
+
+const CLIENT_REGISTRATION_ROLES: UserRole[] = [
+  'executive',
+  'head_of_technical',
+  'sales',
+  'am_team_lead',
+  'am_agent',
+  'ai_engineer',
+];
+
+export const canRegisterClient = (role: UserRole): boolean => CLIENT_REGISTRATION_ROLES.includes(role);
+
+// Temporary account setup / real-login handoff (EmployeeTestingMode.tsx) — deliberately narrower
+// than the general leadership set: Head of Technical + AI Engineer only. Executive lost access
+// here on purpose (confirmed) — this is not part of ai_engineer's broader executive/
+// head_of_technical/am_team_lead equivalence grant elsewhere in this file; it has its own,
+// separate final role set.
+export const canUseEmployeeTestingMode = (role: UserRole): boolean =>
+  role === 'head_of_technical' || role === 'ai_engineer';
+
+// TEMPORARY TRANSITION FEATURE (EmployeeImpersonation.tsx / supabase/functions/
+// employee-impersonation) — intended for removal once every employee has adopted their own real,
+// self-set password. Currently the same two roles as canUseEmployeeTestingMode above, but tracked
+// as its own function rather than reused directly: impersonation needs no password knowledge at
+// all (a magic link, not a real login), a materially different and more sensitive capability than
+// Testing Mode's real-credentials flow, so the two role sets are free to diverge later without
+// entangling one decision with the other.
+export const canImpersonateEmployees = (role: UserRole): boolean =>
+  role === 'head_of_technical' || role === 'ai_engineer';
+
+// Impersonation targets: confirmed no role-based exclusion — head_of_technical/ai_engineer can
+// impersonate any active, non-deactivated employee, including each other, executive, and any
+// team lead, full stop. (An earlier version of this tool excluded leadership and two specific
+// "protected" accounts; both exclusions were explicitly reversed once every employee, including
+// those two, started receiving real password-setup links like anyone else — there was no longer
+// a reason to treat any account differently here.) The only remaining gate is isActiveEmployee
+// (a real linked Auth account, not deactivated), applied directly where employees are listed.
+
+// Shared gate for the client's phone number, the "Client Access" tab (portal/platform login
+// credentials, ad account access notes, payment card details tied to those ad accounts),
+// contract_value, the Signed Contract file (ClientContractsPanel), Payment Tracking
+// (due_value/remaining_value/contract_duration_months), and the Notes field — all financial/
+// PII/credential-grade client data restricted to the roles that own the client relationship
+// end-to-end: Executive, Head of Technical, AM Team Leader, AM Agent. Deliberately excludes every
+// department team lead/agent and (for all of the above except contract_value/Signed Contract,
+// which have their own sales-owns-it exception in canSeeContractValue below) Sales too. One
+// shared list/check so every consumer of this role set can't drift apart.
+const CLIENT_SENSITIVE_INFO_ROLES: UserRole[] = ['executive', 'head_of_technical', 'am_team_lead', 'am_agent', 'ai_engineer'];
+
+export const canAccessClientSensitiveInfo = (role: UserRole): boolean =>
+  CLIENT_SENSITIVE_INFO_ROLES.includes(role);
+
+// contract_value AND the Signed Contract file share this exact gate. Built on top of
+// canAccessClientSensitiveInfo's role set — Sales is the one deliberate addition: they entered
+// the figure and uploaded the file themselves at registration, and may see either only for their
+// own clients (sales_owner_id === them), never anyone else's. isOwnClient is the caller's job to
+// compute (e.g. client.sales_owner_id === currentUser.id) since this function has no client in
+// scope.
+export const canSeeContractValue = (role: UserRole, isOwnClient: boolean): boolean => {
+  if (canAccessClientSensitiveInfo(role)) return true;
+  if (role === 'sales' && isOwnClient) return true;
+  return false;
+};
+
+// An employee created via the "Add Employee" admin flow (single form or bulk upload) starts with
+// auth_id null — a real Supabase Auth account hasn't been provisioned for them yet (that only
+// happens out-of-band via scripts/provisionAuthUsers.ts, since it needs the service-role key).
+// Until then they can't log in at all, so every picker/list that lets someone assign real work to
+// an employee (task assignee, AM assignment, brief routing, campaign ownership, the demo-login
+// list, etc.) or that aggregates an employee's performance/capacity must exclude them — otherwise
+// work silently piles up on someone who can never see or act on it. Lookups that just resolve an
+// existing reference's display name (e.g. "who submitted this brief") are unaffected; a pending
+// employee can never actually be set as one of those references in the first place, since every
+// picker feeding them is filtered here too.
+export const isPendingEmployee = (user: Pick<UserRecord, 'auth_id'>): boolean => !user.auth_id;
+
+// A deactivated employee (users.deactivated_at set) is the opposite lifecycle end from pending:
+// they DID have a working account, but have been permanently shut off — their row stays (so their
+// name still displays correctly on every historical task/brief/daily-log/report they're
+// referenced from), their auth.users account is banned out-of-band by
+// scripts/deactivateAuthUser.ts, and every picker/list that isPendingEmployee() already excludes
+// them from must exclude a deactivated employee too, for the same reason: work must never pile up
+// on someone who can no longer act on it.
+export const isDeactivatedEmployee = (user: Pick<UserRecord, 'deactivated_at'>): boolean => !!user.deactivated_at;
+
+// The single check every "assignable/active employee" picker or list should use instead of
+// isPendingEmployee() alone — covers both ends of the lifecycle a working employee isn't at.
+export const isActiveEmployee = (user: Pick<UserRecord, 'auth_id' | 'deactivated_at'>): boolean =>
+  !isPendingEmployee(user) && !isDeactivatedEmployee(user);
+
+// The 4 department team leads + am_team_lead — every role with "team_lead" reach over a specific
+// department's own employees (distinct from executive/head_of_technical's org-wide reach).
+export const DEPARTMENT_TEAM_LEAD_ROLES: UserRole[] = [
+  'am_team_lead',
+  'seo_team_lead',
+  'media_buying_team_lead',
+  'social_media_team_lead',
+];
+
+// Employee edit/deactivate and client hard-delete both share this exact access rule: leadership,
+// or a team lead acting on their own department (RLS's employee_visible()/client visibility rules
+// narrow a team lead's actual reach further — this is just the role-level gate).
+export const canManageEmployeesOrClients = (role: UserRole): boolean =>
+  role === 'executive' || role === 'head_of_technical' || role === 'ai_engineer' || DEPARTMENT_TEAM_LEAD_ROLES.includes(role);
+
+// Each team lead's own department agent-level roles — mirrors users_update_guard_trigger's rule 4
+// exactly (20261030000000_users_update_guard_trigger.sql): the only role values that trigger lets
+// that team lead move someone between (never a team lead role, never another department). Kept
+// separate from TEAM_LEAD_TO_AGENT_ROLE (data/roles.ts) rather than reusing it: that constant has
+// its own other consumers (capacity edit rights, report scoping, task board filtering) and its SEO
+// entry omits programming_agent, while employee_visible() includes it and this trigger — matching
+// this request's explicit instruction — includes it too. Changing TEAM_LEAD_TO_AGENT_ROLE itself
+// would ripple into those unrelated consumers; this is its own single source of truth for the one
+// thing it's for: role-change rights.
+const TEAM_LEAD_ASSIGNABLE_AGENT_ROLES: Partial<Record<UserRole, UserRole[]>> = {
+  am_team_lead: ['am_agent'],
+  media_buying_team_lead: ['media_buying_agent'],
+  seo_team_lead: ['seo_agent', 'programming_agent', 'seo_content_agent', 'seo_backlink_agent'],
+  social_media_team_lead: ['social_media_agent'],
+};
+
+// The role VALUES a given caller may set on someone else's row, per users_update_guard_trigger's
+// rule 4 — executive/head_of_technical/ai_engineer may set any role (allRoles, passed in since
+// that full list lives in data/roles.ts's AGENCY_ROLES, which this file doesn't otherwise need);
+// each team lead is restricted to their own department's agent-level set above; anyone else gets
+// none (and never reaches the Edit Employee form at all — canManageEmployeesOrClients gates that
+// higher up). currentRoleOnRow is always included even when it falls outside the caller's own set,
+// so a team lead editing a row they can only VIEW but not role-change (employee_visible() can show
+// more than it lets them edit) still has their existing value selectable as a no-op — the trigger,
+// not this list, is what actually blocks a real change away from it.
+export const assignableRolesFor = (
+  callerRole: UserRole,
+  currentRoleOnRow: UserRole,
+  allRoles: UserRole[]
+): UserRole[] => {
+  if (callerRole === 'executive' || callerRole === 'head_of_technical' || callerRole === 'ai_engineer') {
+    return allRoles;
+  }
+  const deptRoles = TEAM_LEAD_ASSIGNABLE_AGENT_ROLES[callerRole] || [];
+  return deptRoles.includes(currentRoleOnRow) ? deptRoles : [...deptRoles, currentRoleOnRow];
+};
+
+// Who can access the "Client Onboarding" sidebar tab at all: sales sees SalesPortalView there,
+// every other role in this list sees AMQueue's onboarding & reassignment queue. Shared by both
+// App.tsx's sidebar nav visibility and AMQueue's own "Access Restricted" gate, so a role that
+// isn't authorized never even sees the nav item in the first place — previously the nav item was
+// shown to every role whose roles.ts allowedModules happened to include 'onboarding' (nearly
+// everyone), while AMQueue's actual check only ever allowed these five, so most roles saw the nav
+// item highlighted and active but landed on "Access Restricted" when they clicked it.
+const CLIENT_ONBOARDING_ROLES: UserRole[] = [
+  'executive',
+  'head_of_technical',
+  'sales',
+  'am_team_lead',
+  'am_agent',
+  'ai_engineer',
+];
+
+export const canAccessClientOnboarding = (role?: UserRole): boolean =>
+  !!role && CLIENT_ONBOARDING_ROLES.includes(role);
+
+// Service Brief CONTENT (the actual filled-in answers on a specific client's brief — Target
+// Website URL, Target Keywords, CMS Platform, etc.), as distinct from canEditBriefFieldSchema
+// below (which governs the QUESTIONS themselves, not the answers). Brief content is captured
+// during the AM's discovery meeting and belongs to Account Management + leadership only:
+// executive/head_of_technical/am_team_lead unconditionally, am_agent scoped to their own assigned
+// client. Every department team lead/agent (SEO/Media Buying/Social Media) — previously able to
+// edit their own department's brief content — is view-only now; they keep full view access via
+// ClientDashboard's separate hasBriefViewAccess check, which this does not affect. Mirrors
+// briefs_update_rls/briefs_write_rls exactly — see those migrations for the DB-level twin of this
+// check.
+export const canEditServiceBrief = (
+  role: UserRole,
+  userId: string,
+  client: Pick<ClientRecord, 'am_agent_id'>
+): boolean => {
+  if (role === 'executive' || role === 'head_of_technical' || role === 'am_team_lead' || role === 'ai_engineer') return true;
+  if (role === 'am_agent') return client.am_agent_id === userId;
+  return false;
+};
+
+// CapacityManagement.tsx's "إدارة العملاء"/"إدارة الموظفين" buttons — deliberately separate from
+// canManageEmployeesOrClients above, which already has two different, real consumers
+// (EmployeeAdminHub.tsx's edit/deactivate rights, ClientDashboard.tsx's hard-delete rights) with a
+// broader role set (all four department team leads). These two buttons need narrower, asymmetric
+// role sets of their own: client management includes only AM Team Leader among team leads, and
+// employee management excludes every team lead entirely. Both buttons are visibility-only checks
+// today — clicking either opens ImportDataModal, whose onImport handler is a no-op simulation, not
+// a real client/employee write path (a separate, already-flagged incomplete-feature gap, not
+// something either of these functions needs to account for).
+export const canManageClientsFromCapacity = (role?: UserRole): boolean =>
+  role === 'executive' || role === 'head_of_technical' || role === 'am_team_lead' || role === 'ai_engineer';
+
+export const canManageEmployeesFromCapacity = (role?: UserRole): boolean =>
+  role === 'executive' || role === 'head_of_technical' || role === 'ai_engineer';
+
+// Whether `role` may see a SPECIFIC brief's actual field content — distinct from whether the
+// Service Briefs tab/screen is reachable at all (that's hasBriefViewAccess in ClientDashboard.tsx
+// and the role-based routing in ServiceBriefsRoutingView.tsx). AM/leadership author the brief, so
+// there's nothing to gate for them. Every other role that's otherwise eligible for brief access
+// must wait for brief.submitted_at — before that, it's a private AM-in-progress draft, invisible
+// even if the surrounding tab is already reachable. Mirrors briefs_select_rls's own
+// "and submitted_at is not null" condition on the department team-lead/agent branches — that RLS
+// check is the real security boundary; this is the matching UI-layer check for correct
+// empty-state rendering. Deliberately NOT scoped by the viewer's own department/service: a
+// submitted brief stays visible to every role hasBriefViewAccess already allows onto the tab,
+// exactly as broad as before this change — only the WHEN changed, not the WHICH.
+const BRIEF_CONTENT_ALWAYS_VISIBLE_ROLES: UserRole[] = ['executive', 'head_of_technical', 'am_team_lead', 'am_agent', 'ai_engineer'];
+
+export const canViewBriefContent = (
+  role: UserRole,
+  brief: Pick<BriefRecord, 'submitted_at'> | undefined
+): boolean => {
+  if (BRIEF_CONTENT_ALWAYS_VISIBLE_ROLES.includes(role)) return true;
+  return !!brief?.submitted_at;
+};
+
+// Global brief field schema (brief_field_schemas) write access: executive/head_of_technical/
+// am_team_lead/am_agent unconditionally (including interface briefs, which have no dedicated
+// service team lead), plus each department team lead scoped to only their own
+// service_type.
+export const canEditBriefFieldSchema = (role: UserRole, serviceType: ServiceType): boolean => {
+  if (role === 'executive' || role === 'head_of_technical' || role === 'am_team_lead' || role === 'am_agent' || role === 'ai_engineer') {
+    return true;
+  }
+  if (role === 'seo_team_lead') return serviceType === 'seo';
+  if (role === 'media_buying_team_lead') return serviceType === 'media_buying';
+  if (role === 'social_media_team_lead') return serviceType === 'social_media';
+  return false;
+};

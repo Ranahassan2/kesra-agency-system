@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Defense-in-depth alongside public/.htaccess's real Cache-Control header for this same
+         file: a stale cached copy of index.html is the one file that can silently defeat every
+         other fix in this app, since it's what points the browser at which hashed JS bundle to
+         load. Browsers give http-equiv Cache-Control far less weight than a real HTTP header, so
+         this is a backstop, not the primary fix — but it's zero-cost to include. -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <script>
+      // Captures a password-recovery/invitation link's marker from the URL synchronously, before
+      // any module JS — including the Supabase client — has even begun loading. This closes a
+      // confirmed race, not just narrows it: @supabase/auth-js's _getSessionFromURL() does a
+      // network round-trip (awaiting _getUser(access_token)) and only THEN clears
+      // window.location.hash, as part of a background promise chain it starts on its own the
+      // moment the client is constructed — fully independent of React's render/effect cycle. If
+      // App.tsx's mount effect (or its onAuthStateChange listener, which can receive this same
+      // already-processed session relabeled as 'INITIAL_SESSION' instead of 'PASSWORD_RECOVERY')
+      // reads window.location.hash/search AFTER that clearing has already happened, the "this is
+      // an unconfirmed recovery session" signal is silently lost and the session gets treated as a
+      // normal completed login. This script runs to completion before the browser even requests
+      // /src/main.tsx, so it reads the URL exactly as the server sent it — no code, including
+      // GoTrue's own, has had any chance to mutate it yet.
+      (function () {
+        try {
+          if (location.hash.includes('type=recovery') || location.search.includes('type=recovery')) {
+            sessionStorage.setItem('agency_recovery_pending', '1');
+          }
+        } catch (e) {
+          // sessionStorage unavailable (private browsing, disabled storage) — App.tsx's own
+          // window.location checks remain as a fallback, racy in exactly the way described above.
+        }
+      })();
+
+      // Runs synchronously, before any CSS or the app loads, so the correct theme is set on
+      // <html> before first paint — avoids a flash of the wrong theme on reload. Kept as a tiny
+      // inline script rather than app JS specifically so it isn't gated behind React mounting.
+      (function () {
+        try {
+          if (localStorage.getItem('agency_theme') === 'light') {
+            document.documentElement.setAttribute('data-theme', 'light');
+          }
+        } catch (e) {
+          // localStorage unavailable (private browsing, disabled storage) — fall back to dark.
+        }
+      })();
+    </script>
+    <title>Kesra Management System</title>
+    <meta name="description" content="Internal agency operational platform for client management, multi-service workflows, capacity, and campaigns" />
+    <meta property="og:title" content="Kesra Management System" />
+    <meta property="og:description" content="Internal agency operational platform for client management, multi-service workflows, capacity, and campaigns" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  </head>
+  <body class="font-['Plus_Jakarta_Sans',sans-serif] antialiased selection:bg-[#7b2ff7]/30 selection:text-[#ffffff]">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
